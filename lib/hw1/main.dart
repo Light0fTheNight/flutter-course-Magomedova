@@ -103,7 +103,7 @@ Widget task2() {
     borderRadius: BorderRadius.circular(8),
   ),
   child: Text(
-    'Подпись...............................................................',
+    'Подпись',
     style: TextStyle(
       fontSize: 16,
       fontStyle: FontStyle.italic,

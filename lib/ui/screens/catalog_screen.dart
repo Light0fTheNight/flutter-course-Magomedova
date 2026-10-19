@@ -1,87 +1,13 @@
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../../domain/entities/board_game.dart';
 import '../widgets/board_game_card.dart';
 
-const List<BoardGame> games = [
-  BoardGame(
-    id: 1,
-    title: 'Колонизаторы',
-    subtitle: 'Klaus Teuber · 1995',
-    category: BoardGameCategory.strategy,
-    genres: ['Стратегия', 'Семейная'],
-    image: 'https://www.igroved.ru/db/games/images/4/4/01.jpg',
-  ),
-  BoardGame(
-    id: 2,
-    title: 'Эпичные схватки боевых магов: Крутагидон',
-    subtitle: 'Ben Stoll · 2019',
-    category: BoardGameCategory.card,
-    genres: ['Стратегия', 'Колодостроительная'],
-    image:
-        'https://hobbygames.ru/image/data/HobbyWorld/Shvatki_Magov/Krutagidon/ESW_Deckbuilding_box_3d-roznica.jpg',
-  ),
-  BoardGame(
-    id: 3,
-    title: 'Каркассон',
-    subtitle: 'Klaus-Jürgen Wrede · 2000',
-    category: BoardGameCategory.strategy,
-    genres: ['Стратегия', 'Семейная'],
-    image:
-        'https://hobbygames.ru/image/data/HobbyWorld/Karkasson/2022/carcassonne_2022_00.jpg',
-  ),
-  BoardGame(
-    id: 4,
-    title: 'Восходящее Солнце',
-    subtitle: 'Eric M. Lang · 2018',
-    category: BoardGameCategory.strategy,
-    genres: [
-      'Стратегия',
-      'Контроль территории',
-      'Варгейм',
-      'Дипломатия',
-    ],
-    image:
-        'https://hobbygames.ru/image/cache/hobbygames_beta/data/HobbyWorld/Voskhodyaschee_Solntse/2021_Tirazh/Voshodyashchee_solnce_00-1024x1024-wm.jpg',
-  ),
-  BoardGame(
-    id: 5,
-    title: 'За бортом',
-    subtitle: 'Jeff Siadek · 2002',
-    category: BoardGameCategory.psychological,
-    genres: ['Психологическая'],
-    image:
-        'https://igrrai.ru/image/catalog/Magellan/Za%20bortom%202/DSC_0868.jpg',
-  ),
-  BoardGame(
-    id: 6,
-    title: 'Манчкин',
-    subtitle: 'Steve Jackson · 2001',
-    category: BoardGameCategory.card,
-    genres: ['Карточная', 'Приключения', 'Пародия'],
-    image:
-        'https://hobbygames.ru/image/data/HobbyWorld/Munchkin/1000/Munchkin_Deluxe00.jpg',
-  ),
-  BoardGame(
-    id: 7,
-    title: 'Бункер',
-    subtitle: 'Оксана Солдатова · 2018',
-    category: BoardGameCategory.psychological,
-    genres: ['Психологическая', 'Дискуссионная', 'Ролевая'],
-    image:
-        'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSnhP_J7pKeGthXiavyGhau5OxvHAgpDF43P05JCjzGS9cmKoa9PYd2CXs&s=10',
-  ),
-  BoardGame(
-    id: 8,
-    title: 'Предназначение',
-    subtitle: 'Michał Gołębiowski · 2021',
-    category: BoardGameCategory.rolePlaying,
-    genres: ['Приключение', 'Дарк-фэнтези', 'Ролевая'],
-    image:
-        'https://migames.ru/wa-data/public/shop/products/21/60/16021/images/26073/26073.970.jpg',
-  ),
-];
+const baseUrl = 'https://6ad66dfbf71f154ac486d69e.mockapi.io';
+const placeholderImage = 'https://placehold.co/300x360.png';
 
 class CatalogScreen extends StatefulWidget {
   const CatalogScreen({super.key});
@@ -91,10 +17,95 @@ class CatalogScreen extends StatefulWidget {
 }
 
 class _CatalogScreenState extends State<CatalogScreen> {
-  final Set<int> _favoriteIds = {};
-  bool _onlyFavorites = false;
+  final Set<String> _favoriteIds = {};
+  final TextEditingController _titleController = TextEditingController();
 
-  void _toggleFavorite(int gameId) {
+  List<BoardGame> _games = [];
+  bool _onlyFavorites = false;
+  bool _isLoading = true;
+  bool _isSending = false;
+  bool _showForm = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadGames();
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadGames() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/boardgames'));
+      if (response.statusCode != 200) {
+        throw Exception('Статус ${response.statusCode}');
+      }
+      final list = jsonDecode(utf8.decode(response.bodyBytes)) as List;
+      final games = list.map((e) => BoardGame.fromJson(e)).toList();
+      if (!mounted) return;
+      setState(() {
+        _games = games;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _addGame() async {
+    final title = _titleController.text.trim();
+    if (title.isEmpty) return;
+
+    setState(() => _isSending = true);
+    try {
+      final newGame = BoardGame(
+        id: '',
+        title: title,
+        subtitle: 'Добавлено из приложения',
+        category: BoardGameCategory.strategy,
+        image: placeholderImage,
+        genres: [],
+        description: '',
+      );
+      final response = await http.post(
+        Uri.parse('$baseUrl/boardgames'),
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+        body: jsonEncode(newGame.toJson()),
+      );
+      if (response.statusCode != 201) {
+        throw Exception('Статус ${response.statusCode}');
+      }
+      final created =
+          BoardGame.fromJson(jsonDecode(utf8.decode(response.bodyBytes)));
+      if (!mounted) return;
+      setState(() {
+        _games.insert(0, created);
+        _isSending = false;
+      });
+      _titleController.clear();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSending = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось отправить: $e')),
+      );
+    }
+  }
+
+  void _toggleFavorite(String gameId) {
     setState(() {
       if (_favoriteIds.contains(gameId)) {
         _favoriteIds.remove(gameId);
@@ -110,15 +121,93 @@ class _CatalogScreenState extends State<CatalogScreen> {
     });
   }
 
+  Widget _buildForm() {
+    return Container(
+      width: double.infinity,
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _titleController,
+              decoration: const InputDecoration(
+                labelText: 'Название',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton(
+            onPressed: _isSending ? null : _addGame,
+            child: _isSending
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Отправить'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody(List<BoardGame> visibleGames) {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Ошибка: $_error',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 16),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: _loadGames,
+                child: const Text('Обновить'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (visibleGames.isEmpty) {
+      return const Center(
+        child: Text('Ничего не нашлось', style: TextStyle(fontSize: 16)),
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        for (final game in visibleGames)
+          BoardGameCard(
+            game: game,
+            isFavorite: _favoriteIds.contains(game.id),
+            onFavoritePressed: () {
+              _toggleFavorite(game.id);
+            },
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final visibleGames = _onlyFavorites
-        ? games.where((game) => _favoriteIds.contains(game.id)).toList()
-        : games;
+        ? _games.where((game) => _favoriteIds.contains(game.id)).toList()
+        : _games;
 
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 209, 166, 228),
-      
       body: SafeArea(
         child: Column(
           children: [
@@ -130,17 +219,28 @@ class _CatalogScreenState extends State<CatalogScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Настольные игры',
-                    style: TextStyle(
-                      fontSize: 23,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF222222),
-                    ),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Настольные игры',
+                          style: TextStyle(
+                            fontSize: 23,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF222222),
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: Icon(_showForm ? Icons.close : Icons.add),
+                        onPressed: () =>
+                            setState(() => _showForm = !_showForm),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'В каталоге: ${games.length} · '
+                    'В каталоге: ${_games.length} · '
                     'В избранном: ${_favoriteIds.length}',
                     style: const TextStyle(
                       fontSize: 12,
@@ -149,7 +249,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
                   ),
                   const SizedBox(height: 8),
 
-                  // Кнопка фильтра под статистикой
+                  // Кнопка фильтра 
                   Align(
                     alignment: Alignment.centerLeft,
                     child: InkWell(
@@ -205,29 +305,11 @@ class _CatalogScreenState extends State<CatalogScreen> {
               ),
             ),
 
-            // Список игр
-            Expanded(
-              child: visibleGames.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'Ничего не нашлось',
-                        style: TextStyle(fontSize: 16),
-                      ),
-                    )
-                  : ListView(
-                      padding: const EdgeInsets.all(12),
-                      children: [
-                        for (final game in visibleGames)
-                          BoardGameCard(
-                            game: game,
-                            isFavorite: _favoriteIds.contains(game.id),
-                            onFavoritePressed: () {
-                              _toggleFavorite(game.id);
-                            },
-                          ),
-                      ],
-                    ),
-            ),
+            // Форма добавления (сворачиваемая)
+            if (_showForm) _buildForm(),
+
+            // Список игр / загрузка / ошибка
+            Expanded(child: _buildBody(visibleGames)),
           ],
         ),
       ),

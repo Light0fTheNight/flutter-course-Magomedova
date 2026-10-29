@@ -1,13 +1,25 @@
-import 'dart:convert';
-
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
 import '../../domain/entities/board_game.dart';
 import '../widgets/board_game_card.dart';
 
-const baseUrl = 'https://6ad66dfbf71f154ac486d69e.mockapi.io';
+const collectionName = 'boardgames';
 const placeholderImage = 'https://placehold.co/300x360.png';
+
+String _categoryLabel(BoardGameCategory category) {
+  switch (category) {
+    case BoardGameCategory.strategy:
+      return 'Стратегия';
+    case BoardGameCategory.psychological:
+      return 'Психологическая';
+    case BoardGameCategory.card:
+      return 'Карточная';
+    case BoardGameCategory.rolePlaying:
+      return 'Ролевая';
+  }
+}
 
 class CatalogScreen extends StatefulWidget {
   const CatalogScreen({super.key});
@@ -17,91 +29,68 @@ class CatalogScreen extends StatefulWidget {
 }
 
 class _CatalogScreenState extends State<CatalogScreen> {
-  final Set<String> _favoriteIds = {};
-  final TextEditingController _titleController = TextEditingController();
+  final _gamesStream = FirebaseFirestore.instance
+      .collection(collectionName)
+      .orderBy('createdAt', descending: true)
+      .snapshots();
 
-  List<BoardGame> _games = [];
+  final Set<String> _favoriteIds = {};
+  final _titleController = TextEditingController();
+  final _subtitleController = TextEditingController();
+  final _imageController = TextEditingController();
+  final _genresController = TextEditingController();
+
+  BoardGameCategory _category = BoardGameCategory.strategy;
   bool _onlyFavorites = false;
-  bool _isLoading = true;
   bool _isSending = false;
   bool _showForm = false;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadGames();
-  }
 
   @override
   void dispose() {
     _titleController.dispose();
+    _subtitleController.dispose();
+    _imageController.dispose();
+    _genresController.dispose();
     super.dispose();
-  }
-
-  Future<void> _loadGames() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-    try {
-      final response = await http.get(Uri.parse('$baseUrl/boardgames'));
-      if (response.statusCode != 200) {
-        throw Exception('Статус ${response.statusCode}');
-      }
-      final list = jsonDecode(utf8.decode(response.bodyBytes)) as List;
-      final games = list.map((e) => BoardGame.fromJson(e)).toList();
-      if (!mounted) return;
-      setState(() {
-        _games = games;
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _isLoading = false;
-      });
-    }
   }
 
   Future<void> _addGame() async {
     final title = _titleController.text.trim();
     if (title.isEmpty) return;
 
+    final image = _imageController.text.trim();
+    final genres = _genresController.text
+        .split(',')
+        .map((genre) => genre.trim())
+        .where((genre) => genre.isNotEmpty)
+        .toList();
+
     setState(() => _isSending = true);
     try {
       final newGame = BoardGame(
         id: '',
         title: title,
-        subtitle: 'Добавлено из приложения',
-        category: BoardGameCategory.strategy,
-        image: placeholderImage,
-        genres: [],
-        description: '',
+        subtitle: _subtitleController.text.trim(),
+        category: _category,
+        image: image.isEmpty ? placeholderImage : image,
+        genres: genres,
       );
-      final response = await http.post(
-        Uri.parse('$baseUrl/boardgames'),
-        headers: {'Content-Type': 'application/json; charset=UTF-8'},
-        body: jsonEncode(newGame.toJson()),
-      );
-      if (response.statusCode != 201) {
-        throw Exception('Статус ${response.statusCode}');
-      }
-      final created =
-          BoardGame.fromJson(jsonDecode(utf8.decode(response.bodyBytes)));
-      if (!mounted) return;
-      setState(() {
-        _games.insert(0, created);
-        _isSending = false;
+      await FirebaseFirestore.instance.collection(collectionName).add({
+        ...newGame.toJson(),
+        'ownerId': FirebaseAuth.instance.currentUser!.uid,
+        'createdAt': FieldValue.serverTimestamp(),
       });
       _titleController.clear();
+      _subtitleController.clear();
+      _imageController.clear();
+      _genresController.clear();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _isSending = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось отправить: $e')),
+        SnackBar(content: Text('Не удалось сохранить: $e')),
       );
+    } finally {
+      if (mounted) setState(() => _isSending = false);
     }
   }
 
@@ -121,196 +110,256 @@ class _CatalogScreenState extends State<CatalogScreen> {
     });
   }
 
-  Widget _buildForm() {
+  Widget _buildHeader(int total) {
+    final email = FirebaseAuth.instance.currentUser?.email ?? '';
+
     return Container(
       width: double.infinity,
       color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: TextField(
-              controller: _titleController,
-              decoration: const InputDecoration(
-                labelText: 'Название',
-                border: OutlineInputBorder(),
-                isDense: true,
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Настольные игры',
+                  style: TextStyle(
+                    fontSize: 23,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF222222),
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: Icon(_showForm ? Icons.close : Icons.add),
+                tooltip: _showForm ? 'Скрыть форму' : 'Добавить игру',
+                onPressed: () => setState(() => _showForm = !_showForm),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'В каталоге: $total · '
+                  'В избранном: ${_favoriteIds.length}\n'
+                  '$email',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF858585),
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => FirebaseAuth.instance.signOut(),
+                icon: const Icon(Icons.logout, size: 18),
+                label: const Text('Выйти'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+
+          // Кнопка фильтра
+          Align(
+            alignment: Alignment.centerLeft,
+            child: InkWell(
+              onTap: () {
+                _toggleFavoritesFilter(!_onlyFavorites);
+              },
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color:
+                      _onlyFavorites ? const Color(0xFFE3F0EF) : Colors.white,
+                  border: Border.all(
+                    color: _onlyFavorites
+                        ? const Color(0xFFE3F0EF)
+                        : const Color(0xFFEAEAEA),
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _onlyFavorites ? Icons.favorite : Icons.favorite_border,
+                      size: 14,
+                      color: _onlyFavorites
+                          ? const Color.fromARGB(255, 200, 0, 107)
+                          : const Color(0xFF858585),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      'Только избранные',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: _onlyFavorites
+                            ? const Color(0xFF376F70)
+                            : const Color(0xFF333333),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 8),
-          ElevatedButton(
-            onPressed: _isSending ? null : _addGame,
-            child: _isSending
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Отправить'),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildBody(List<BoardGame> visibleGames) {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+  Widget _buildField(TextEditingController controller, String label) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: TextField(
+        controller: controller,
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          isDense: true,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildForm() {
+    return Container(
+      width: double.infinity,
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      child: Column(
+        children: [
+          _buildField(_titleController, 'Название *'),
+          _buildField(_subtitleController, 'Автор · год'),
+          _buildField(_imageController, 'Ссылка на картинку'),
+          _buildField(_genresController, 'Жанры через запятую'),
+          Row(
             children: [
-              Text(
-                'Ошибка: $_error',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 16),
+              Expanded(
+                child: DropdownButton<BoardGameCategory>(
+                  value: _category,
+                  isExpanded: true,
+                  items: [
+                    for (final category in BoardGameCategory.values)
+                      DropdownMenuItem(
+                        value: category,
+                        child: Text(_categoryLabel(category)),
+                      ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => _category = value);
+                    }
+                  },
+                ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(width: 8),
               ElevatedButton(
-                onPressed: _loadGames,
-                child: const Text('Обновить'),
+                onPressed: _isSending ? null : _addGame,
+                child: _isSending
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Отправить'),
               ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildContent(
+    AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>> snapshot,
+    List<BoardGame> visibleGames,
+  ) {
+    if (snapshot.hasError) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(
+          'Ошибка: ${snapshot.error}',
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 16),
         ),
       );
     }
-    if (visibleGames.isEmpty) {
-      return const Center(
-        child: Text('Ничего не нашлось', style: TextStyle(fontSize: 16)),
+    if (!snapshot.hasData) {
+      return const Padding(
+        padding: EdgeInsets.all(32),
+        child: Center(child: CircularProgressIndicator()),
       );
     }
-    return ListView(
+    if (visibleGames.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(32),
+        child: Center(
+          child: Text('Ничего не нашлось', style: TextStyle(fontSize: 16)),
+        ),
+      );
+    }
+    return Padding(
       padding: const EdgeInsets.all(12),
-      children: [
-        for (final game in visibleGames)
-          BoardGameCard(
-            game: game,
-            isFavorite: _favoriteIds.contains(game.id),
-            onFavoritePressed: () {
-              _toggleFavorite(game.id);
-            },
-          ),
-      ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final game in visibleGames)
+            BoardGameCard(
+              game: game,
+              isFavorite: _favoriteIds.contains(game.id),
+              onFavoritePressed: () {
+                _toggleFavorite(game.id);
+              },
+            ),
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final visibleGames = _onlyFavorites
-        ? _games.where((game) => _favoriteIds.contains(game.id)).toList()
-        : _games;
-
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 209, 166, 228),
       body: SafeArea(
-        child: Column(
-          children: [
-            // Шапка каталога
-            Container(
-              width: double.infinity,
-              color: Colors.white,
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+        child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _gamesStream,
+          builder: (context, snapshot) {
+            final games = snapshot.hasData
+                ? snapshot.data!.docs
+                    .map((doc) => BoardGame.fromFirestore(doc))
+                    .toList()
+                : <BoardGame>[];
+            final visibleGames = _onlyFavorites
+                ? games
+                    .where((game) => _favoriteIds.contains(game.id))
+                    .toList()
+                : games;
+
+            return Column(
+              children: [
+                _buildHeader(games.length),
+
+                Expanded(
+                  child: ListView(
+                    padding: EdgeInsets.zero,
                     children: [
-                      const Expanded(
-                        child: Text(
-                          'Настольные игры',
-                          style: TextStyle(
-                            fontSize: 23,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF222222),
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: Icon(_showForm ? Icons.close : Icons.add),
-                        onPressed: () =>
-                            setState(() => _showForm = !_showForm),
-                      ),
+                      if (_showForm) _buildForm(),
+                      _buildContent(snapshot, visibleGames),
                     ],
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'В каталоге: ${_games.length} · '
-                    'В избранном: ${_favoriteIds.length}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF858585),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-
-                  // Кнопка фильтра 
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: InkWell(
-                      onTap: () {
-                        _toggleFavoritesFilter(!_onlyFavorites);
-                      },
-                      borderRadius: BorderRadius.circular(20),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: _onlyFavorites
-                              ? const Color(0xFFE3F0EF)
-                              : Colors.white,
-                          border: Border.all(
-                            color: _onlyFavorites
-                                ? const Color(0xFFE3F0EF)
-                                : const Color(0xFFEAEAEA),
-                          ),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              _onlyFavorites
-                                  ? Icons.favorite
-                                  : Icons.favorite_border,
-                              size: 14,
-                              color: _onlyFavorites
-                                  ? const Color.fromARGB(255, 200, 0, 107)
-                                  : const Color(0xFF858585),
-                            ),
-                            const SizedBox(width: 5),
-                            Text(
-                              'Только избранные',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
-                                color: _onlyFavorites
-                                    ? const Color(0xFF376F70)
-                                    : const Color(0xFF333333),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Форма добавления (сворачиваемая)
-            if (_showForm) _buildForm(),
-
-            // Список игр / загрузка / ошибка
-            Expanded(child: _buildBody(visibleGames)),
-          ],
+                ),
+              ],
+            );
+          },
         ),
       ),
     );

@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 enum BoardGameCategory {
   strategy,
   psychological,
@@ -24,19 +26,21 @@ class BoardGame {
   final List<String> genres;
   final String description;
 
-  factory BoardGame.fromJson(Map<String, dynamic> json) {
+  factory BoardGame.fromFirestore(
+      DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data()!;
     return BoardGame(
-      id: json['id'] as String,
-      title: json['title'] as String,
-      subtitle: json['subtitle'] as String,
-      category: BoardGameCategory.values.byName(json['category'] as String),
-      image: json['image'] as String,
-      genres: List<String>.from(json['genres'] as List),
-      description: json['description'] as String? ?? '',
+      id: doc.id,
+      title: data['title'] as String? ?? '',
+      subtitle: data['subtitle'] as String? ?? '',
+      category: BoardGameCategory.values.asNameMap()[data['category']] ??
+          BoardGameCategory.strategy,
+      image: data['image'] as String? ?? '',
+      genres: List<String>.from(data['genres'] as List? ?? const []),
+      description: data['description'] as String? ?? '',
     );
   }
 
-  // id не отправляем, его выдаёт сервер
   Map<String, dynamic> toJson() {
     return {
       'title': title,

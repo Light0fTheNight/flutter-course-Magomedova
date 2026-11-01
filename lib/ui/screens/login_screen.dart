@@ -1,5 +1,6 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
+import '../../data/auth_repository.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -11,6 +12,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _auth = AuthRepository();
   String? _error;
   bool _isLoading = false;
 
@@ -35,22 +37,16 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     try {
       if (register) {
-        await FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: email,
-          password: password,
-        );
+        await _auth.register(email, password);
       } else {
-        await FirebaseAuth.instance.signInWithEmailAndPassword(
-          email: email,
-          password: password,
-        );
+        await _auth.signIn(email, password);
       }
-    } on FirebaseAuthException catch (e) {
+    } on AuthException catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.code);
+      setState(() => _error = e.message);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = '$e');
+      setState(() => _error = 'Не удалось войти: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -114,7 +110,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       if (_error != null) ...[
                         const SizedBox(height: 12),
                         Text(
-                          'Ошибка: $_error',
+                          _error!,
                           textAlign: TextAlign.center,
                           style: const TextStyle(color: Colors.red),
                         ),

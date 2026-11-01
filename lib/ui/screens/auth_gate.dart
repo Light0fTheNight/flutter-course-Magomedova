@@ -1,9 +1,10 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../bloc/board_games_bloc.dart';
 import '../../bloc/board_games_event.dart';
+import '../../data/auth_repository.dart';
+import '../../data/board_games_repository.dart';
 import 'catalog_screen.dart';
 import 'login_screen.dart';
 
@@ -12,8 +13,8 @@ class AuthGate extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
+    return StreamBuilder<String?>(
+      stream: AuthRepository().userIdChanges(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
@@ -24,7 +25,8 @@ class AuthGate extends StatelessWidget {
           return const LoginScreen();
         }
         return BlocProvider(
-          create: (_) => BoardGamesBloc()..add(BoardGamesLoadRequested()),
+          create: (_) => BoardGamesBloc(BoardGamesRepository())
+            ..add(BoardGamesLoadRequested()),
           child: const CatalogScreen(),
         );
       },

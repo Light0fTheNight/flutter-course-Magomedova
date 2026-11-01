@@ -1,6 +1,9 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../bloc/board_games_bloc.dart';
+import '../../bloc/board_games_event.dart';
 import 'catalog_screen.dart';
 import 'login_screen.dart';
 
@@ -20,7 +23,10 @@ class AuthGate extends StatelessWidget {
         if (snapshot.data == null) {
           return const LoginScreen();
         }
-        return const CatalogScreen();
+        return BlocProvider(
+          create: (_) => BoardGamesBloc()..add(BoardGamesLoadRequested()),
+          child: const CatalogScreen(),
+        );
       },
     );
   }

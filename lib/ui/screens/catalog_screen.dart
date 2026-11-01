@@ -1,11 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../bloc/board_games_bloc.dart';
+import '../../bloc/board_games_event.dart';
+import '../../bloc/board_games_state.dart';
 import '../../domain/entities/board_game.dart';
 import '../widgets/board_game_card.dart';
-
-const collectionName = 'boardgames';
 const placeholderImage = 'https://placehold.co/300x360.png';
 
 String _categoryLabel(BoardGameCategory category) {
@@ -29,11 +31,6 @@ class CatalogScreen extends StatefulWidget {
 }
 
 class _CatalogScreenState extends State<CatalogScreen> {
-  final _gamesStream = FirebaseFirestore.instance
-      .collection(collectionName)
-      .orderBy('createdAt', descending: true)
-      .snapshots();
-
   final Set<String> _favoriteIds = {};
   final _titleController = TextEditingController();
   final _subtitleController = TextEditingController();
@@ -279,24 +276,38 @@ class _CatalogScreenState extends State<CatalogScreen> {
     );
   }
 
-  Widget _buildContent(
-    AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>> snapshot,
-    List<BoardGame> visibleGames,
-  ) {
-    if (snapshot.hasError) {
-      return Padding(
-        padding: const EdgeInsets.all(24),
-        child: Text(
-          'Ошибка: ${snapshot.error}',
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 16),
-        ),
-      );
-    }
-    if (!snapshot.hasData) {
+   Widget _buildContent(BoardGamesState state, List<BoardGame> visibleGames) {
+    if (state is BoardGamesLoadInProgress) {
       return const Padding(
         padding: EdgeInsets.all(32),
         child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (state is BoardGamesLoadFailure) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            Text(
+              state.message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Нажмите «Обновить», чтобы попробовать ещё раз',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: Color(0xFF555555)),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: () => context
+                  .read<BoardGamesBloc>()
+                  .add(BoardGamesLoadRequested()),
+              child: const Text('Обновить'),
+            ),
+          ],
+        ),
       );
     }
     if (visibleGames.isEmpty) {
@@ -330,13 +341,10 @@ class _CatalogScreenState extends State<CatalogScreen> {
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 209, 166, 228),
       body: SafeArea(
-        child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: _gamesStream,
-          builder: (context, snapshot) {
-            final games = snapshot.hasData
-                ? snapshot.data!.docs
-                    .map((doc) => BoardGame.fromFirestore(doc))
-                    .toList()
+        child: BlocBuilder<BoardGamesBloc, BoardGamesState>(
+          builder: (context, state) {
+            final games = state is BoardGamesLoadSuccess
+                ? state.games
                 : <BoardGame>[];
             final visibleGames = _onlyFavorites
                 ? games
@@ -353,7 +361,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
                     padding: EdgeInsets.zero,
                     children: [
                       if (_showForm) _buildForm(),
-                      _buildContent(snapshot, visibleGames),
+                      _buildContent(state, visibleGames),
                     ],
                   ),
                 ),
